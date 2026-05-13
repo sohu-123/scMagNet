@@ -38,4 +38,4 @@ import numpy as np
 Download here: https://drive.google.com/drive/folders/1Vf8iVi29hQqXOYWpDYSgmuAbWvS5l6XL?usp=sharing
 
 ### Example:
-Run this file step by step: JointEmbedding.ipynb
+Run this file step by step: python JointEmbedding4.py
