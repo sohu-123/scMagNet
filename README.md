@@ -8,7 +8,10 @@ Single‑cell RNA‑seq (scRNA‑seq) captures gene expression at high resolutio
 
 - Aligning cell types with spatial locations  
 - Predicting unmeasured gene expression in spatial data  
-- Integrating multiple datasets across technologies  
+- Integrating multiple datasets across technologies
+
+  ![Method: Figure1](./assets/images/Figure1-final-fit-nolegend-2.png)
+
 
 ## 🚀 Getting Started
 
