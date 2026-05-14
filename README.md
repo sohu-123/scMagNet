@@ -4,13 +4,15 @@ This repository provides the implementation for **deeply mapping single‑cell R
 
 ## 📌 Overview
 
+  ![Method: Figure1](./Figure1-final-fit-nolegend-2.png)
+
 Single‑cell RNA‑seq (scRNA‑seq) captures gene expression at high resolution but loses spatial context, while spatial transcriptomics (ST) retains tissue architecture but at lower cellular resolution. This project bridges the two modalities by learning a **joint embedding** where cells from scRNA‑seq and spots from ST are mapped to a common latent space. The learned representations can be used for:
 
 - Aligning cell types with spatial locations  
 - Predicting unmeasured gene expression in spatial data  
 - Integrating multiple datasets across technologies
 
-  ![Method: Figure1](./Figure1-final-fit-nolegend-2.png)
+
 
 
 ## 🚀 Getting Started
