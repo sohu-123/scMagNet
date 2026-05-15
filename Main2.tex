@@ -1,0 +1,438 @@
+% !Mode:: "TeX:UTF-8"
+\documentclass[10pt,a4paper]{article}
+
+% ==================== 核心包（Nature Communications 风格） ====================
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}          % 现代字体支持
+\usepackage{helvet}           % 提供无衬线字体（Helvetica 风格）
+\usepackage{courier}          % 等宽字体
+\usepackage{microtype}        % 改善微排版
+\usepackage{amsmath, amssymb}
+\usepackage{graphicx}
+\usepackage{cite}
+
+% ==================== 页面边距（双倍行距、2.54 cm 四边） ====================
+\usepackage[
+  a4paper,
+  left=2.54cm,
+  right=2.54cm,
+  top=2.54cm,
+  bottom=2.54cm,
+  headheight=12pt,
+  headsep=0.5cm,
+  footskip=1cm
+]{geometry}
+
+% ==================== 字体与行距（Nature Communications 风格） ====================
+\renewcommand{\familydefault}{\sfdefault}   % 全局无衬线字体（类似 Arial/Helvetica）
+\usepackage{setspace}
+\doublespacing                             % 双倍行距（Nature Communications 投稿要求）
+
+% 段落格式：无首行缩进，段间自动间距
+\usepackage{parskip}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt plus 2pt minus 1pt}
+
+% ==================== 章节标题字号（加粗、放大） ====================
+\usepackage{sectsty}
+\sectionfont{\fontsize{14}{16}\selectfont\bfseries}
+\subsectionfont{\fontsize{12}{14}\selectfont\bfseries}
+\subsubsectionfont{\fontsize{11}{13}\selectfont\bfseries}
+
+% ==================== 图表标题格式（Nature 惯用） ====================
+\usepackage{caption}
+\usepackage{subcaption}
+\captionsetup[figure]{font=small,labelfont=bf,name=Fig.,labelsep=space}
+\captionsetup[table]{font=small,labelfont=bf,name=Table,labelsep=space}
+
+% ==================== 参考文献样式 ====================
+\usepackage{natbib}
+\bibliographystyle{unsrtnat}
+
+% ==================== 标题与作者 ====================
+\title{scMagNet: Deep learning-based triple alignment from scRNA-seq to spatial transcriptomics}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\abstract{The absence of spatial information in single-cell RNA sequencing (scRNA-seq) and the limited resolution of spatial transcriptomics (ST) hinder a comprehensive dissection of intracellular and intercellular signaling mechanisms. Computational integration offers a promising solution, yet existing methods often struggle to simultaneously preserve consistency across spatial architecture, raw expression profile and latent expression patterns. Here we propose scMagNet, a deep learning framework for mapping scRNA-seq data to ST data. scMagNet achieves robust integration through triple alignment in the original count space, a learned latent space, and the expectation of counts, guided by manifold regularization that incorporates spatial coordinates. scMagNet delivers the most precise cell-to-spot alignment and cell-type proportion inference in benchmarking evaluations. This approach establishes a direct mapping between single cells and detected cells in the original tissue image, enabling the reconstruction of genome-wide spatial transcriptomic data at single-cell resolution. scMagNet enables the estimation of spatial gene regulation patterns, providing a comprehensive tool for dissecting complex multicellular systems.}
+
+\section{Introduction}
+
+Multicellular systems rely on the coordinated interplay of diverse cell types to maintain homeostasis and adapt to environmental perturbations. This process is governed by the precise orchestration of intracellular and intercellular signaling, primarily mediated through two mechanisms: (1) intercellular signaling, or cell-cell communication, which typically involves ligand-receptor interactions to coordinate population-level behaviors \cite{wang2023promising}; and (2) intracellular signaling, which encompasses receptor activation, signal transduction cascades, and transcriptional regulation within individual cells, ultimately dictating cell fate and state~\cite{Yuan2025}. Consequently, obtaining genome-wide gene expression data at single-cell resolution within their native spatial context is of paramount importance for dissecting these complex systems. However, achieving this remains a technological challenge. While scRNA-seq lacks spatial context, current spatial transcriptomics (ST) technologies generally fail to achieve true single-cell resolution, and image-based ST approaches are often limited in transcriptome coverage~\cite{Stahl2016,Moses2022,Chen2015}.
+
+Given the complementary nature of scRNA-seq and ST data, computational integration offers a promising direction to bridge this gap. Existing computational methods generally fall into three categories. The first focuses on cell-type-level deconvolution, leveraging reference scRNA-seq datasets to estimate the proportions of annotated cell types within each spatial spot. Representative methods include RCTD \cite{Cable2022}, SPOTlight \cite{Elosua-Bayes2021}, and Spotiphy \cite{Yang2025}. While robust in characterizing tissue composition, these approaches yield population-level insights and cannot establish direct correspondence between individual cells and specific spatial coordinates. The second category attempts to map single cells directly to spatial locations, often employing Optimal Transport (OT) frameworks, as seen in Tangram \cite{Biancalani2021} and NovoSpaRc \cite{Moriel2021}. However, these methods often struggle to fully integrate spatial priors into the optimization framework. Furthermore, by operating directly on raw expression data, they may fail to capture the spatial manifold structure and latent expression patterns, resulting in mappings that do not fully reflect underlying biological properties. The third category, which aims to directly predict spatial locations for individual cells, often suffers from overfitting ~\cite{Wei2022,Qian2023,Li2025}. In addition, current methods fall short of achieving true single-cell resolution within the native ST tissue.
+
+To mitigate the limitations of the previous methods, we propose scMagNet. This framework contributes to the field of spatial transcriptomics analysis in several key ways. First, scMagNet employs a deep learning framework to achieve robust cell-to-spot mapping through triple alignment in the original count space, a learned latent space, and the expected counts. Second, scMagNet fully leverages spatial information to guide scRNA-seq to ST mapping through manifold regularization. Third, scMagNet establishes mapping between scRNA-seq cells and detected cells in the original tissue image. This enables reconstruction of genome-wide spatial transcriptomic data at single-cell resolution. Fourth, scMagNet enables the estimation of gene regulation pattern along with spatial coordinate.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1.0\linewidth]{Figure1-final-fit-nolegend.pdf}
+    \caption{\textbf{Overview of the scMagNet framework.} \\ 
+\textbf{a}, Schematic illustration of scMagNet. The architecture is visually represented by the shape of a MagNet. scRNA-seq expression data (pink) are compressed into cell embeddings (orange). The cell-spot mapping matrix A bridges cell embeddings to generate the corresponding spot embeddings (green), which are subsequently aligned with spatial locations. Furthermore, this mapping bridges the predicted spatial transcriptomic data (blue) and the reconstructed scRNA-seq gene expression.
+If the cell-type annotations and paired H&E-stained is provided, scMagNet could further generate spot deconvolution and the cell-H&E detected cell deconvolution. \textbf{b}, Downstream applications of scMagNet. scMagNet reconstructs genome-wide, single-cell-resolution spatial transcriptomic data. These data support analyses of cellular neighborhood composition and spatial gene regulation.
+}
+    \label{fig:Method}
+\end{figure}
+
+\section{scMagNet: deep learning-based triple alignment method to reconstruct mapping from scRNA-seq to ST data}
+
+scMagNet is a computational framework designed to infer alignment between single cells from scRNA-seq (sc) and spatial spots from spatial transcriptomics (ST) data (Fig. 1a). By integrating gene expression count matrices from scRNA-seq and ST datasets from same tissue context, cell-type annotations, and the corresponding H\&E-stained tissue image, scMagNet provides a unified solution for cell-to-spot mapping, spot deconvolution, and cell-to-H\&E cell mapping, while simultaneously embedding both cells and spots into a joint latent space. scMagNet is distinguished by its ability to establish the cell-to-spot mapping that co-aligns the original count matrices, the joint latent space, and the expectation of count within an end-to-end variational autoencoder (VAE) framework.
+
+scMagNet comprises three key steps: (1) inferring the joint latent space and establishing cell-to-spot alignment; (2) inferring spot deconvolution; and (3) mapping scRNA-seq cells to detected cells in H\&E images (hereafter referred to as 'H\&E cells'). Within the model, VAE generates cell embeddings, while spot embeddings are formulated as the weighted sum of cell embeddings, based on the inferred cell-to-spot alignment. 
+This spot embedding is further regularized to maintain smooth with a spatial graph derived from the k-nearest neighbors (KNN) of the spatial coordinates. 
+In addition, the expectation of the ST count matrix is modeled as the weighted sum of reconstructed scRNA-seq gene expression exprectation, guided by the inferred alignment. This alignment is constrained to reconstruct the ST data from scRNA-seq profiles based on the original count matrix. We term this integrated approach a 'triple alignment' (see Methods for more detail).
+
+Subsequently, the cell-to-spot alignment serves as the foundation for inferring both spot deconvolution and the mapping between scRNA-seq cells and H\&E cells using a multi-objective optimization strategy. Spot deconvolution is modeled as the aggregation of cell-to-spot alignments belonging to the same cell type. To ensure spatial coherence, we incorporate a manifold regularization term based on the normalized Laplacian matrix of the KNN spatial graph mentioned above, which enforces similar deconvolution profiles for spatially adjacent spots.
+
+cell-to-H\&E cell mapping is guided by three primary objectives: (1) consistency with cell-to-spot mapping, ensuring that mapped H\&E cells are localized in proximity to their corresponding aligned spots; (2) spatial coherence, ensuring that neighboring HE cells receive similar mappings; and (3) transcriptional consistency, ensuring that H\&E cells with similar gene expression profiles receive similar mapping. For each H\&E cell, scMagNet assigns the scRNA-seq cell with the highest alignment probability. This process effectively generates genome-wide, single-cell-resolution spatial transcriptomic data (Fig. 1b), which can be leveraged for downstream analyses such as characterizing cellular neighborhood composition and investigating spatial gene regulation patterns.
+
+\section{scMagNet achieves high accuracy in scRNA-seq to ST mapping on simulation data}
+
+Due to the ground truth of scRNA-seq to ST data mapping is typically unavailable, we generated a simulated dataset to evaluate scMagNet. We leveraged a MERFISH~\cite{merfish} dataset comprising 254 genes from the mouse primary motor cortex (MOp) to simulate scRNA-seq and ST data. We generated simulated ST spots by aggregating gene expression from cells within circular regions (radius = 45 pixels) arranged on a regular grid. We discard spatial coordinates from the original data to serve as a scRNA-seq reference. This paired dataset, comprising 454 simulated spots and 4,198 single cells, was used to train and evaluate our model.
+
+The MERFISH-derived ground truth reveals a highly structured spatial organization across 22 annotated cell types, broadly categorized into glutamatergic, GABAergic, and non-neuronal classes. Glutamatergic neurons---particularly intratelencephalic (IT) subtypes---exhibit a layered distribution to the overall cellular layout (Fig. 2a). Consistent with this organization, the cellular composition within each simulated spot recapitulates the similar pattern (Fig. 2b). We use a 32-dimensional embedding to represent each cell. Uniform manifold approximation and projection (UMAP) visualization of the embedding demonstrates clear separation of cell types, with cells of the same type tightly clustered (silhouette index = 0.42; Fig. 2c). The embedding faithfully preserves transcriptional information, achieving Pearson correlation coefficients (PCC) of 0.85 at the cell level and 0.75 at the gene level when reconstructing the original scRNA-seq profiles (Fig. 2d). It suggests the embedding confirms both biological cell type and orginal count matrix reconstruction.
+
+We inferred probabilistic mappings from cells to spots and benchmarked performance against NovoSpaRc, Tangram and Spotiphy. Due to extreme class imbalance (positive:negative mapping pairs is around 453:1), we evaluated models using precision--recall (PR) curves (Fig. 2e), and reported the ratio of area under the PR curve (AUPR) relative to random prediction (AUPR ratio). We further calculate AUPR ratio for each cell, our method achieves significantly higher AUPR ratios across all cells (One-tailed t-test, P $\leq$ 0.0033; Fig. 2f). Aggregating predicted mappings by cell type yields spot-level deconvolution estimates that closely match ground-truth compositions (Fig. 2g). The spot-wise PCC between predicted and true cell-type proportions is significantly higher than competing methods (One-tailed t-test, P $\leq3.09\times 10^{-23}$ ; Fig. 2h).
+
+Finally, we assessed cell-to-H\&E cell mapping accuracy by comparing predicted assignments to ground-truth locations. While 12.4\% of cells are mapped to their exact original coordinates, 34.6\% are assigned to spots containing cells of the correct type---highlighting the model's ability to recover biologically meaningful spatial context even when precise localization remains challenging (Fig. 2i).
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1.0\linewidth]{figure2-simulation-nolegend.pdf}
+    \caption{\textbf{Performance of scMagNet on MERFISH-based simulated data.}  \\ \textbf{a}, Simulated ST data based on MERFISH mouse brain data, colored by cell-type label. Circles represent simulated spots. The right panel is the cell-type proportion of the dataset. Colors in a-d, g, and i denote cell-type labels. \textbf{b}, Spot deconvolution ground truth of simulated ST data. \textbf{c}, UMAP visualization of cell embeddings. \textbf{d}, Dot plot comparing reconstructed and original gene expression. Each dot represents one gene, and color indicates cell type. One cell per cell type was randomly selected for display. \textbf{e}, Precision-recall curves for cell-to-spot mapping, colored by methods. \textbf{f}, Log-normalized AUPR ratios for cells. $p$-value were calculated using one-tailed paired t-test on the original AUPR ratios. $p$-value is $1.58\times10^{-30}$ for scMagNet and NovoSpaRc, while $p$-value is $0.0033$ for scMagNet and Tangram. \textbf{g}, Predicted spot-level deconvolution. We keep the top eight cell type with highest cell proportion. \textbf{h}, Spot-wise Pearson correlations between predicted cell-type proportions and ground truth. $p$-values (scMagNet vs. NovoSpaRc, Tangram, and Spotiphy) are $4.47\times10^{-53}$, $3.09\times10^{-23}$, and $1.44\times10^{-46}$, respectively. \textbf{i}, Mapping of single cells to H\&E image-derived cellular locations.}
+    \label{fig:Result2}
+\end{figure}
+
+\section{scMagNet excels in spot deconvolution on sequencing data}
+
+To evaluate our method on sequencing data, we applied it to two publicly available datasets comprising matched scRNA-seq, spatial transcriptomics (ST), and hematoxylin--eosin (H\&E) images: (1) an Alzheimer's disease (AD) mouse brain dataset with deconvolution ground truth derived from the original study (Fig. 3a) and (2) a human squamous cell carcinoma (SCC) cohort.
+
+For the mouse brain dataset~\cite{Yang2025}, we integrated scRNA-seq profiles from 20,000 downsampled cells (representing 27 annotated cell types) with ST data from 3,476 spots. Using the StarDist deep-learning-based nuclei segmentation model on H\&E images, we identified 44,497 individual cells. Our method learned a 32-dimensional single-cell embedding that effectively separated all major cell types (silhouette index = 0.65; Fig. 3b) and accurately reconstructed original gene expression profiles (cell-level PCC = 0.86; gene-level PCC = 0.72). Deconvolution results for representative glutamatergic subtypes---including L2/3 IT CTX, L4 IT CTX, L6 CT CTX, CA1/CA3, as well as SUB, and Oligodendrocytes---show strong visual and quantitative consistency with ground truth (Fig. 3a). In addition, the spot-wise PCC between predicted and true cell-type proportions was significantly higher than all competing state-of-the-art methods (One-tailed t-test, P $\leq$ 0.03; Fig. 3c). Spotiphy appears comparable to our method, yet it directly predicts cell type compositions without inferring explicit cell-to-spot mappings.
+
+In the human SCC dataset~\cite{Ji2020} (21 cell types, 26,299 scRNA-seq cells; 666 ST spots), our deconvolution correctly localized tumor-specific keratinocytes (TSKs) to the leading edge of the cancer region of the tumor, consistent with the originally defined TSK score (Fig. 3d,e). Similarly, predicted B cell abundances showed high concordance with the expression of the canonical B cell marker CD79A (Fig. 3f,g). These results demonstrate that scMagNet robustly reconstructs biologically plausible spatial architectures across diverse tissue contexts and disease states.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1.0\linewidth]{figure3-nolegend-fit.pdf}
+    \caption{\textbf{Performance of scMagNet on mouse brain and human SCC datasets.} \\  \textbf{a}, Spot deconvolution for representative glutamatergic subtypes (L2/3 IT CTX, L4 IT CTX, L6 CT CTX, CA1/CA3, SUB) and oligodendrocytes in the AD mouse brain dataset. The first row denotes the ground truth of cell type's proportion across the tissue, while the second row denotes the predicted value. Panels a to c correspond to the AD mouse brain dataset. \textbf{b}, UMAP visualization of the cell embedding, colored by cell-type labels. \textbf{c}, Violin plot for spot-wise PCC between predicted and ground truth cell-type proportions. In this study, we use the following convention for symbols indicating statistical significance: ns, $P > 0.05$; *, $P \le 0.05$; **, $P \le 0.01$; ***, $P \le 0.001$; ****, $P \le 0.0001$. $P$ values comparing scMagNet with Spotiphy, NovoSpaRc, Tangram, and RCTD are $0.03$, $3.48\times10^{-279}$, $3.44\times10^{-283}$, and $1.65\times10^{-227}$, respectively. \textbf{d}, Proportion of tumor-specific keratinocytes (TSKs) for spots in the human SCC dataset. Panels d to g correspond to the human SCC dataset. \textbf{e}, TSK score in the human SCC dataset, which is the average expression of TSK signature genes. \textbf{f}, Proportion of B-cell predicted by scMagNet. \textbf{g}, Expression level of the CD79A in ST data.}
+    \label{fig:Result3}
+\end{figure}
+
+\section{scMagNet reveals the cellular interaction pattern}
+
+We applied scMagNet to infer cell-to-H\&E cell mapping in both wild-type (WT) and Alzheimer's disease (AD) mouse brain samples. Each single cell from scRNA-seq data is assigned to the H\&E cell with the highest mapping probability. Leveraging annotated scRNA-seq data, we transferred cell-type labels to the spatial context of the tissue. This data is further used to study cellular interaction pattern.
+
+Following cell segmentation and the removal of artifacts located distal to the tissue or original spots, we identified 42,408 and 44,497 cells in the WT and AD samples, respectively. As shown in Figure 4a,b, the reconstructed cell types exhibited a distinct layered organization of glutamatergic neurons (including L2/3, L4, L5, L5/6 IT CTX, and L6b CTX). The spatial arrangement in the AD sample showed high concordance with the ground truth presented in Figure 2. In the WT sample, we validated the predicted cell type for H\&E cells by visualizing the spatial distribution of canonical markers expression level, including Rorb (L4/L5), Cplx3 (L6b), Aqp4 (Astrocytes), Pvalb (Pval), and Camk2b (CA). The expression patterns of these markers were highly consistent with their respective cell-type assignments.
+
+Furthermore, we characterized the spatial architecture by integrating Pairwise Cell-Cell Interaction (PCI) likelihood ratios with Cell Neighborhood (CN) analysis (see Methods for details). While CN captures window-based local cellular composition, PCI focuses on the spatial interplay between specific cell types~\cite{chenlei,Schurch2020}. After filtering low-abundance populations, we computed the Pearson correlation of regional cell-type composition and PCI scores for the left 21 cell types (Figure 4d,e). Glutamatergic, GABAergic, and glial populations formed distinct clusters with strong positive intra-class correlations (highlighted by blue box). Notably, we observed a spatial co-localization preference between oligodendrocytes and L6b CTX neurons in AD compared with WT sample, suggesting a potential susceptibility of oligodendrocytes to migrate toward or accumulate in this cortical layer.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1.0\linewidth]{figure4-small-fitnolegend.pdf}
+    \caption{\textbf{Elucidating cellular interactions through scMagNet inferred cell to H&E cell mapping} \\
+\textbf{a} and \textbf{b}, Cell to H&E cell mapping result of wild type (WT) and Alzheimer's disease (AD) mouse brain samples, respectively. Each single cell from scRNA-seq data is assigned to the H&E cell with the highest mapping probability. \textbf{c}, Spatial distribution of cell-type marker genes expression in ST data from WT samples. Rorb, Cplx3, Aqp4, Pvalb, and Camk2b represent L4/L5 neurons, L6b CTX neurons, astrocytes, Pvalb, and CA, respectively. \textbf{d} and \textbf{e}, Heatmap showing the pairwise correlation and pairwise cell-cell interaction (PCI) between 21 cell types in the AD and WT sample, respectively. Cell types are ordered into three major lineages: Glutamatergic (left blue box), GABAergic (middle blue box), and glial (right blue box).
+}
+    \label{fig:Result4}
+\end{figure}
+
+\section{Spatial gene regulation pattern analysis}
+
+Studying the spatial pattern of gene regulatory networks (GRNs) remains challenging due to the technical difficulty of obtaining genome-wide expression data at single-cell resolution with spatial location. scMagNet could generate this single-cell-resolution spatial whole transcriptomics directly from the cell to H\&E cell mapping result. Based on this data, we reconstructed the GRN, identified spatially variable regulon and modules, and then dissected the differences between wild-type (WT) and Alzheimer's disease (AD) samples within the mouse brain.
+
+We first inferred GRNs from scRNA-seq data using SCENIC~\cite{Aibar2017}, yielding TF regulatory (regulon) activities for 112 transcription factors, defined as the aggregate expression of their downstream target genes (TGs). These activities were subsequently mapped onto spatial coordinates.
+
+We identified spatially variable regulons by Squidpy~\cite{Palla2022}, characterized by localized activity in specific tissue regions. As a result, the Egr3 and Mef2c regulons were highly spatially variable in both WT and AD sample (Fig. 5a,b). While Egr3 is a major regulator in developing neurons~\cite{Egr3GABRA4} and Mef2c is essential for cortical electrical activity and neuronal distribution~\cite{Harrington2016,Li2008,Bridi2017}, Their regulatory activities spanned a broader spatial domain in the AD brain, contrasting with the more restricted, localized patterns in WT. In the AD sample, Egr3 activity was elevated in regions corresponding to Pvalb-positive interneurons. Additionally, Zbtb33 exhibited higher spatial variability in AD, whereas Foxf2 was more variable in WT, suggesting a dysregulation of its transcriptional program in the disease state. Given that Foxf2 plays a critical role in cerebral small vessel disease and stroke, and considering the pivotal involvement of brain vasculature in neurodegenerative disorders like Alzheimer's disease, this finding points to a potential vascular component in AD pathology~\cite{TodorovVolgyi2025, Sewell2025, Yang2022}.
+
+To further dissect the regulatory architecture, we identified 10 distinct regulatory modules by performing non-negative matrix factorization (NMF) on 1,605 cell-type-specific target genes. TFs and TGs are assigned to modules, where each subnetwork is defined as the vertex-induced subgraph comprising these module-specific factors. The regulatory module activity is calculated by aggregate normalized expression of their factors for each H\&E cell. The regulatory strength heatmap demonstrated high intra-module connectivity and relative independence between modules (Fig. 5c). Among these modules, Subnetwork 4 and Subnetwork 7 exhibited prominent spatial variability according to the score from Squidpy~\cite{Palla2022}. Subnetwork 4 was driven by key regulators including Dnajc21, Nuak1, Ovol2 (Fig. 5d), while subnetwork 7 was driven by factors Sox10, Myrf, and Olig1 (Fig. 5e). Subnetwork 4 is active in glutamatergic neurons, while Subnetwork 7 enriches in oligodendrocytes (Fig. 5f,g). This is consistent with the pubishhed paper. Ovol2 functions as a critical regulator of neural development by supporting the migration and survival of neural crest cells~\cite{Mackay2006}. Sox10, Olig1 and Myrf are capable of  regulating oligodendrocyte  differentiation ~\cite{Wang2014, Huang2021}. These findings indicate that Subnetwork 7 plays a pivotal role in oligodendrocyte maturation and myelin maintenance, which is known to be significantly downregulated and dysfunctional in the AD brain~\cite{Kedia2025}. Notably, in the AD sample, Subnetwork 7 displayed heightened activity within a specific spatially restricted subpopulation of oligodendrocytes (Fig. 5g).  Consequently, this subnetwork likely reflects the impaired differentiation and failed remyelination capacity characteristic of oligodendrocyte lineage cells in the disease state.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1.0\linewidth]{figure 5-small-fit-nolegend.pdf}
+    \caption{\textbf{scMagNet inferred single-cell-resolution spatial whole transcriptomics reveals spatial gene regulation pattern} \\
+a and b, TF regulation activity spatial patterns in WT and AD mouse brains, respectively. Color intensity represents activity strength. c, Heatmap of regulation strength across 10 identified regulatory modules (subnetworks). TF and TG are ordered by according to module assignment. Each box represents one regulatory module. d and e, GRN topology of subnetworks 4 and 7. Orange diamonds denote TFs; green circles denote TGs. Node size corresponds to node degree. f and g, Spatial distribution of subnetwork activity for WT and AD samples. 
+}
+    \label{fig:Result5}
+\end{figure}
+
+\section{Conclusion}
+In this study, we presented scMagNet, a deep learning framework that integrates single-cell RNA-seq and spatial transcriptomics data through dual alignment in the original count space and a learned latent space. By incorporating manifold regularization and multi-objective optimization, scMagNet achieves three key advancements: (1) accurate cell-to-spot mapping and spot deconvolution, (2) direct assignment of single cells to morphologically defined cells in H&E images, thereby reconstructing genome-wide gene expression at true single-cell resolution, and (3) downstream spatial analyses including cellular interaction inference and spatially resolved gene regulatory network characterization.
+
+Extensive validation on simulated MERFISH data demonstrated that scMagNet significantly outperforms existing methods in cell-to-spot mapping accuracy and spot-wise deconvolution. Application to real sequencing datasets—an Alzheimer's disease mouse brain and a human squamous cell carcinoma cohort—further confirmed its robustness, correctly localizing cell-type-specific populations such as oligodendrocytes and tumor-specific keratinocytes. Moreover, by mapping regulon activities and identifying spatially variable subnetworks (e.g., a subnetwork enriched for oligodendrocyte maturation factors), scMagNet revealed disease-associated spatial dysregulation in the AD brain, including broader activity of certain regulons and heightened activity of a specific subnetwork in a restricted oligodendrocyte subpopulation.
+
+Overall, scMagNet offers a unified, interpretable, and experimentally feasible solution to bridge single-cell transcriptomics with spatial tissue architecture. It not only achieves high-resolution spatial reconstruction but also enables downstream discovery of cellular interactions and spatial gene regulation. We anticipate that scMagNet will serve as a valuable tool for dissecting the spatial organization of complex tissues in both health and disease.
+
+\bibliographystyle{unsrtnat}
+\begin{thebibliography}{9}
+
+\bibitem{wang2023promising}
+Wang, X., Almet, A. A., \& Nie, Q. (2023). The promising application of cell-cell interaction analysis in cancer from single-cell and spatial transcriptomics. \emph{Seminars in Cancer Biology}, 95, 42–51.
+
+
+\bibitem{Stahl2016}
+Ståhl, P. L., Salmén, F., Vickovic, S., Lundmark, A., Navarro, J. F., Magnusson, J., Giacomello, S., Asp, M., Westholm, J. O., Huss, M., Mollbrink, A., Linnarsson, S., Codeluppi, S., Borg, Å., Pontén, F., Costea, P. I., Sahlén, P., Mulder, J., Bergmann, O., Lundeberg, J., \& Frisén, J. (2016). Visualization and analysis of gene expression in tissue sections by spatial transcriptomics. \emph{Science}, 353(6294), 78–82.
+
+\bibitem{Moses2022}
+Moses, L., \& Pachter, L. (2022). Museum of spatial transcriptomics. \emph{Nature Methods}, 19(5), 534–546.
+
+\bibitem{Chen2015}
+Chen, K. H., Boettiger, A. N., Moffitt, J. R., Wang, S., \& Zhuang, X. (2015). Spatially resolved, highly multiplexed RNA profiling in single cells. \emph{Science}, 348(6233), aaa6090.
+
+
+\bibitem{Cable2022}
+Cable, D. M. et al. (2022). Robust decomposition of cell type mixtures in spatial transcriptomics. \emph{Nature Biotechnology}, 40(4), 517–526.
+
+\bibitem{Elosua-Bayes2021}
+Elosua-Bayes, M., Nieto, P., Mereu, E., Gut, I., \& Heyn, H. (2021). SPOTlight: seeded NMF regression to deconvolute spatial transcriptomics spots with single-cell transcriptomes. \emph{Nucleic Acids Research}, 49(9), e50.
+
+\bibitem{Yang2025}
+Yang, J., Zheng, Z., Jiao, Y., Yu, K., Bhatara, S., Yang, X., Natarajan, S., Zhang, J., Pan, Q., Easton, J., Yan, K.-K., Peng, J., Liu, K., \& Yu, J. (2025). Spotiphy enables single-cell spatial whole transcriptomics across an entire section. \emph{Nature Methods}, 22(4), 724–736.
+
+\bibitem{Biancalani2021}
+Biancalani, T., Scalia, G., Buffoni, L., et al. (2021). Deep learning and alignment of spatially resolved single-cell transcriptomes with Tangram. \emph{Nature Methods}, 18(11), 1352–1362.
+
+\bibitem{Moriel2021}
+Moriel, N., Senel, E., Friedman, N., Rajewsky, N., Karaiskos, N., \& Nitzan, M. (2021). NovoSpaRc: flexible spatial reconstruction of single-cell gene expression with optimal transport. \emph{Nature Protocols}, 16, 4177–4200.
+
+\bibitem{Wei2022}
+Wei, R., He, S., Bai, S., Sei, E., Hu, M., Thompson, A., Chen, K., Krishnamurthy, S., \& Navin, N. E. (2022). Spatial charting of single-cell transcriptomes in tissues. \emph{Nature Biotechnology}, 40, 1190–1199.
+
+\bibitem{Qian2023}
+Qian, J., Liao, J., Liu, Z., Chi, Y., Fang, Y., Zheng, Y., Shao, X., Liu, B., Cui, Y., Guo, W., et al. (2023). Reconstruction of the cell pseudo-space from single-cell RNA sequencing data with scSpace. \emph{Nature Communications}, 14, 2484.
+
+\bibitem{Li2025}
+Li, S., Shen, Q., \& Zhang, S. (2025). Spatial transcriptomics-aided localization for single-cell transcriptomics with STALocator. \emph{Cell Systems}, 16, 101195.
+
+\bibitem{merfish}
+Qiu, X., Zhou, T., Li, S., Wu, J., Tang, J., Ma, G., Yang, S., Hu, J., Wang, K., Shen, S., Wang, H., \& Chen, L. (2024). Spatial single-cell protein landscape reveals vimentinhigh macrophages as immune-suppressive in the microenvironment of hepatocellular carcinoma. \emph{Nature Cancer}, 5(10), 1557–1578.
+
+\bibitem{chenlei}
+Qiu, X., Zhou, T., Li, S., Wu, J., Tang, J., Ma, G., Yang, S., Hu, J., Wang, K., Shen, S., Wang, H., \& Chen, L. (2024). Spatial single-cell protein landscape reveals vimentinhigh macrophages as immune-suppressive in the microenvironment of hepatocellular carcinoma. \emph{Nature Cancer}, 5(10), 1557–1578.
+
+\bibitem{Schurch2020}
+Schürch, C. M. et al. (2020). Coordinated cellular neighborhoods orchestrate antitumoral immunity at the colorectal cancer invasive front. \emph{Cell}, 182, 1341–1359.
+
+\bibitem{Ji2020}
+Ji, A. L., Rubin, A. J., Thrane, K., Jiang, S., Reynolds, D. L., Meyers, R. M., Guo, M. G., George, B. M., Mollbrink, A., Bergenstråhle, J., Larsson, L., Bai, Y., Zhu, B., Bhaduri, A., Meyers, J. M., Rovira-Clavé, X., Hollmig, S. T., Aasi, S. Z., Nolan, G. P., Lundeberg, J., \& Khavari, P. A. (2020). Multimodal Analysis of Composition and Spatial Architecture in Human Squamous Cell Carcinoma. \emph{Cell}, 182(2), 497–514.e22.
+
+\bibitem{Yuan2025}
+Yuan, Q., et al. (2025). Inferring gene regulatory networks from single-cell multiome data using atlas-scale external data. \emph{Nature Biotechnology}, 43(2), 247–257. 
+
+\bibitem{Aibar2017} S. Aibar, C. B. Gonz\'alez-Blas, T. Moerman, V. A. Huynh-Thu, H. Imrichova, G. Hulselmans, F. Rambow, J.-C. Marine, P. Geurts, J. Aerts, J. van den Oord, Z. K. Atak, J. Wouters, and S. Aerts, ``SCENIC: single-cell regulatory network inference and clustering,'' \emph{Nature Methods}, vol. 14, no. 11, pp. 1083--1086, 2017, doi: 10.1038/nmeth.4463.
+
+\bibitem{Palla2022}
+Palla, G., Spitzer, H., Klein, M., Fischer, D., Schaar, A. C., Kuemmerle, L. B., Rybakov, S., Ibarra, I. L., Holmberg, O., Virshup, I., Lotfollahi, M., Richter, S., \& Theis, F. J. (2022). Squidpy: a scalable framework for spatial omics analysis. \emph{Nature Methods}, 19(2), 171–178.
+
+\bibitem{Mackay2006} D. R. Mackay, M. Hu, B. Li, C. Rhéaume, and X. Dai, ``The mouse Ovol2 gene is required for cranial neural tube development,'' \emph{Developmental Biology}, vol. 291, no. 1, pp. 38--52, Mar. 2006, doi: 10.1016/j.ydbio.2005.12.003.
+
+\bibitem{Wang2014} J. Wang, S. U. Pol, A. K. Haberman, C. Wang, M. A. O'Bara, and F. J. Sim, ``Transcription factor induction of human oligodendrocyte progenitor fate and differentiation,'' \emph{Proceedings of the National Academy of Sciences}, vol. 111, no. 28, pp. E2885--E2894, Jul. 2014, doi: 10.1073/pnas.1408295111.
+
+\bibitem{Huang2021} 
+H. Huang, F. Zhou, S. Zhou, and M. Qiu, ``MYRF: A mysterious membrane-bound transcription factor involved in myelin development and human diseases,'' \emph{Neuroscience Bulletin}, vol. 37, no. 6, pp. 881--884, 2021, doi: 10.1007/s12264-021-00678-9.
+
+\bibitem{Kedia2025} 
+S. Kedia and M. Simons, ``Oligodendrocytes in Alzheimer's disease pathophysiology,'' \emph{Nature Neuroscience}, vol. 28, no. 3, pp. 446--456, 2025, doi: 10.1038/s41593-025-01873-x.
+
+% 第一篇（Egr3）
+\bibitem{Egr3GABRA4}
+Author, A. (Year). Egr3 stimulation of GABRA4 promoter activity as a mechanism for seizure-induced up-regulation of GABAA receptor α4 subunit expression. \emph{Journal}, volume(pages).
+
+% 第二篇（MEF2C 调控突触和行为）
+\bibitem{Harrington2016}
+Harrington, A. J., Bridges, C. M., Berto, S., Blankenship, K., Cho, J., Assali, A., Siemsen, B., Moore, H. W., Tsvetkov, E., Thielking, A., Konopka, G., \& Cowan, C. W. (2016). MEF2C regulates cortical inhibitory and excitatory synapses and behaviors relevant to neurodevelopmental disorders. \emph{eLife}, 5, e20059.
+
+% 第三篇（MEF2C 影响神经干/祖细胞分化）
+\bibitem{Li2008}
+Li, H., Radford, J. C., Ragusa, M. J., Shea, K. L., McKercher, S. R., Zaremba, J. D., Soussou, W., Nie, Z., Kang, Y.-J., Nakanishi, N., Okamoto, S., \& Lipton, S. A. (2008). Transcription factor MEF2C influences neural stem/progenitor cell differentiation and maturation in vivo. \emph{Proceedings of the National Academy of Sciences}, 105(6), 1937–1942.
+
+% 第四篇（MEF2C 在睡眠剥夺反应中的作用）
+\bibitem{Bridi2017}
+Bridi, M. C. D., Zong, F. J., Min, X., Luo, N., Tran, T., Qiu, J., Severin, D., Zhang, X. T., Wang, G., Zhu, Z. J., He, K. X., \& Kirkwood, A. (2017). An essential role for MEF2C in the cortical response to loss of sleep in mice. \emph{Sleep}, 40(11), zsx151.
+
+\bibitem{TodorovVolgyi2025} 
+K. Todorov-V\"olgyi, J. Gonz\'alez-Gallego, S. A. M\"uller, ..., \emph{et al.}, ``The stroke risk gene Foxf2 maintains brain endothelial cell function via Tie2 signaling,'' \emph{Nature Neuroscience}, vol. 29, pp. 325--336, 2026, doi: 10.1038/s41593-025-02136-5.
+
+\bibitem{Sewell2025} 
+M. Sewell, N. Fialova, and A. Montagne, ``Unraveling the transcriptomic landscape of brain vascular cells in dementia: A systematic review,'' \emph{Alzheimer's \& Dementia}, vol. 21, no. 2, p. e14512, 2025, doi: 10.1002/alz.14512.
+
+\bibitem{Yang2022} 
+A. C. Yang, R. T. Vest, F. Kern, ``A human brain vascular atlas reveals diverse mediators of Alzheimer's risk,'' \emph{Nature}, vol. 603, no. 7903, pp. 885--892, 2022, doi: 10.1038/s41586-021-04369-3.
+
+\end{thebibliography}
+
+\section{Method}
+\subsection{scMagNet pipeline}
+scMagNet is a computational framework designed to reconstruct the mapping from scRNA-seq to ST data. Overall, scMagNet generates the embedding of cells from scRNA-seq data, using the mapping to generate spot embeddings, which could reconstruct the original gene expression. To ensure the mapping is preserved in the original gene expression space, the latent space, and the gene expression expectation, we employ triple alignment approach. Moreover, scMagNet incorporates manifold regularization to facilitate spot deconvolution and the mapping of cells to H\&E images.
+
+The inputs of scMagNet are scRNA-seq gene count matrix $X \in \mathbb{R}^{(N \times G)}$, ST gene count matrix $Y \in \mathbb{R}^{(M \times G)}$, spot locations $P \in \mathbb{R}^{(M \times 2)}$ and H\&E cell locations $L \in \mathbb{R}^{(H \times 2)}$, with $N$ representing the number of cells in sc, $M$ representing the number of spots of ST data, $G$ representing the number of genes, and $H$ representing the number of cells detected in the H\&E image. The number of cells in each spot is calculated as the number of spots given spot center and radius from the cell detection, which is represented by $C \in \mathbb{R}^{M}$. Let $j$ denote the $j$-th cell in the scRNA-seq data, $k$ represent gene $k$, and $i$ indicate spot $i$.
+\subsubsection{ Cell-to-spot alignment}
+We model the scRNA-seq and ST data as the Poisson distribution:
+\begin{equation}
+x_{jk} \sim \mathrm{Poisson}\left( \lambda_{jk}^{\mathrm{sc}} \right),
+\end{equation}
+\begin{equation}
+y_{ik} \sim \mathrm{Poisson}\left( \lambda_{ik}^{\mathrm{st}} \right),
+\end{equation}
+where $\lambda^{\mathrm{sc}}$ and $\lambda^{\mathrm{st}}$ denote the Poisson rates (expectation) for the scNRA-seq and ST data, respectively. The Poisson rates are generated from low-dimensional latent variables (cell embeddings), $z_{j}^{\mathrm{sc}} \in \mathbb{R}^{d}$, with multilayer perceptron (MLP) neural networks. $z_{j}^{\mathrm{sc}}$ is modeled as diagonal-covariance normal distributions.
+\begin{equation}
+q_{\varphi}\left( z_{j}^{\mathrm{sc}} | x_{j} \right) = \mathcal{N}\left( z_{j}^{\mathrm{sc}}; \mathrm{MLP}_{\mu}(x_{j};\theta), \mathrm{MLP}_{\sigma^{2}}(x_{j};\theta) \right)
+\end{equation}
+\begin{equation}
+\lambda_{j, \cdot}^{\mathrm{sc}} = \mathrm{MLP}_{\lambda}\left( z_{j}^{\mathrm{sc}}; \varphi \right)
+\end{equation}
+Spot embedding $z_{i}^{\mathrm{st}}$ is modeled as the sum of the composition of cell embeddings:
+\begin{equation}
+z_{i}^{\mathrm{st}} = \sum_{j} a_{ij} z_{j}^{\mathrm{sc}},
+\end{equation}
+while the Poisson rate of spot is modeled as combination of cell Poisson rates:
+\begin{equation}
+\lambda_{i, \cdot}^{\mathrm{st}} = \sum_{j} a_{ij} \lambda_{j, \cdot}^{\mathrm{sc}},
+\end{equation}
+
+The assignment matrix $A$ is parameterized as a softmax over rows: $a_{ij} = \frac{\exp(\alpha_{ij})}{\sum_{j} \exp(\alpha_{ij})}$, where $\alpha_{ij}$ are learnable parameters. $a_{ij}$ represents the probability of cell $j$ belonging to spot $i$.
+
+The loss function includes loss for cell embedding and loss for alignment matrix.
+
+\textbf{(1) Loss for cell embedding:}
+
+To stabilize training, we align the one-layer MLP of learned cell latent to the PCA coordinates. The loss for cell embedding is composed of the variational lower bound (ELBO) of scRNA-seq and a PCA-guided loss $\mathcal{L}_{\mathrm{PCA}}$. ELBO is optimized by minimizing the negative ELBO, composed of a reconstruction term $\mathcal{L}_{\mathrm{recon}}^{\mathrm{sc}}$ and a regularization term $\mathcal{L}_{\mathrm{KL}}$.
+\begin{equation}
+\mathcal{L}_{\mathrm{embed}} = \mathcal{L}_{\mathrm{recon}}^{\mathrm{sc}} + \lambda_{1} \mathcal{L}_{\mathrm{KL}} + \lambda_{2} \mathcal{L}_{\mathrm{PCA}}
+\end{equation}
+where the reconstruction loss based on the Poisson assumption is:
+\begin{equation}
+\mathcal{L}_{\mathrm{recon}}^{\mathrm{sc}} = - \sum_{j=1}^{N} \sum_{k=1}^{G} \left( x_{jk}^{\mathrm{sc}} \log \lambda_{jk}^{\mathrm{sc}} - \lambda_{jk}^{\mathrm{sc}} \right),
+\end{equation}
+The regularization term is the Kullback-Leibler (KL) divergence between the approximate posterior $q_{\varphi}(z_{j}^{\mathrm{sc}} | x_{j})$ and the standard normal prior $p(z_{j}^{\mathrm{sc}}) = \mathcal{N}(0,I)$:
+\begin{equation}
+\mathcal{L}_{\mathrm{KL}} = \frac{1}{2} \sum_{j=1}^{N} \sum_{d=1}^{D} \left( \mu_{jd}^{2} + \sigma_{jd}^{2} - \log(\sigma_{jd}^{2}) - 1 \right).
+\end{equation}
+
+where $\mu_{j,\cdot} = \mathrm{MLP}_{\mu}(x_{j};\theta)$ and $\sigma_{j,\cdot}^{2} = \mathrm{MLP}_{\sigma^{2}}(x_{j};\theta)$, $D$ is the dimension of embedding.
+
+PCA loss is
+\begin{equation}
+\mathcal{L}_{\mathrm{PCA}} = \frac{1}{N} \sum_{j}^{N} \left\| \mathrm{MLP}(\mathbf{z}_{j}^{\mathrm{sc}}; \beta) - \mathbf{z}_{j}^{\mathrm{PCA}} \right\|_{2}^{2}
+\end{equation}
+
+where $\mathbf{z}_{j}^{\mathrm{PCA}}$ are the first $d$ principal components of cell $j$.
+
+\textbf{(2) Loss for alignment matrix:}
+
+We use the alignment matrix to match the original gene count matrix ($\mathcal{L}_{\mathrm{original}}$), the expectation of gene count ($\mathcal{L}_{\mathrm{expectation}}$), the embedding ($\mathcal{L}_{\mathrm{spatial}}$), and the cell count for each spot ($\mathcal{L}_{\mathrm{count}}$).
+\begin{equation}
+\mathcal{L}_{A} = \lambda_{3} \mathcal{L}_{\mathrm{original}} + \lambda_{4} \mathcal{L}_{\mathrm{expectation}} + \lambda_{5} \mathcal{L}_{\mathrm{spatial}} + \lambda_{6} \mathcal{L}_{\mathrm{count}}
+\end{equation}
+To require the alignment to match with the original count matrix, we use the alignment and ST count matrix to predict the scRNA-seq count matrix:
+
+$$\widehat{X^{\mathrm{sc}}} = A X^{\mathrm{st}}$$
+
+Considering the scale of $\widehat{X^{\mathrm{sc}}}$ and $X^{\mathrm{sc}}$ is different, we used the cosine similarity across cells as loss:
+\begin{equation}
+\mathcal{L}_{\mathrm{original}} = \frac{1}{G} \sum_{k=1}^{G} \frac{1}{2} \left( 1 - \cos\left( X_{\cdot,k}^{\mathrm{sc}}, \widehat{X_{\cdot,k}^{\mathrm{sc}}} \right) \right)
+\end{equation}
+
+The reconstruction loss based on the Poisson assumption is:
+
+\begin{equation}
+\mathcal{L}_{\mathrm{expectation}} = - \sum_{i=1}^{M} \sum_{k=1}^{G} \left( x_{ik}^{\mathrm{st}} \log \lambda_{ik}^{\mathrm{st}} - \lambda_{ik}^{\mathrm{st}} \right),
+\end{equation}
+We construct a spatial graph $\mathcal{G}$ from spot coordinates $P$ using $k$-nearest neighbors (here $k = 15$) with Gaussian kernel edge weight $S_{ij} = \exp\left( - d_{ij}^{2} / 2\sigma_{i}^{2} \right)$. The smoothness loss encourages neighboring spots to have similar latent embeddings:
+\begin{equation}
+\mathcal{L}_{\mathrm{spatial}} = \sum_{i,j} S_{ij} \left\| \mathbf{z}_{i}^{\mathrm{st}} - \mathbf{z}_{j}^{\mathrm{st}} \right\|_{2}^{2}
+\end{equation}
+The sum of the probabilities of $A$ should be correlated with the number of cells in a spot:
+\begin{equation}
+\mathcal{L}_{\mathrm{count}} = \frac{1}{M} \sum_{i=1}^{M} \frac{1}{2} \left( 1 -\cos\left( \sum_{j}^{N} A_{ij}, c_{i}\right) \right)
+\end{equation}
+
+\subsubsection{Spot deconvolution reconstruction}
+
+The inferred cell-to-spot mapping can generate spot deconvolution by summing the probabilities by cell type for each spot. To refine this initial spot deconvolution result, we employed a manifold regularization optimization according to the spatial graph.
+
+Let $P^{(0)} \in \mathbb{R}^{M \times T}$ denote the initial cell-type proportion matrix derived from the preliminary alignment, where $M$ is the number of spatial spots and $T$ is the number of cell types. We aimed to learn an optimized matrix $P \in \mathbb{R}^{M \times T}$ that balances fidelity to the initial prediction with spatial coherence. First, we constructed a spatial neighborhood graph based on the physical coordinates of the spots. An adjacency matrix $W \in \mathbb{R}^{M \times M}$ was generated using a $k$-nearest neighbors (KNN) algorithm. To account for variations in node connectivity, we utilized the symmetric normalized Laplacian matrix, defined as $L_{\mathrm{norm}} = I - D^{-1/2} W D^{-1/2}$, where $D$ is the degree matrix of $W$.
+
+The optimization problem was formulated to minimize a composite loss function consisting of two terms: (1) a similarity term preserving the cosine similarity between the optimized matrix $P$ and the initialization $P^{(0)}$; and (2) a graph smoothness term penalizing the quadratic variation of cell proportions across the spatial graph. The objective function is given by:
+
+\begin{equation}
+\mathcal{L} = \frac{1}{M} \sum_{i=1}^{M} \left( \frac{1}{2} - \frac{1}{2} \cos\left( P_{i,\cdot}, P_{i,\cdot}^{(0)} \right) \right) + \lambda \, \mathrm{tr}\left( P^{\top} L_{\mathrm{norm}} P \right)
+\end{equation}
+
+To ensure that the rows of $P$ represent valid probability distributions (summing to unity), we parameterized $P$ via the softmax function applied to a learnable logit matrix.
+
+\subsubsection{Cell to H\&E cell mapping}
+
+Given the cell-to-spot alignment, cell type labels, locations of spots and H\&E cells, we aim to infer a probabilistic mapping from cells to H\&E cells. Let $D^{(1)} \in \mathbb{R}^{M \times H}$ be a distance matrix between $M$ spatial locations and $H$ target points (e.g., cells in the spatial image). Let $L \in \{0,1\}^{N \times T}$ be a one-hot encoding of the cell type labels for the $N$ source cells.
+
+Our goal is to learn a matrix $B \in \mathbb{R}^{H \times N}$, where $b_{h,j}$ is the probability that target point $h$ originates from source cell $j$. The optimization objective consists of two terms: (1) consistency with the obtained spatial alignment, and (2) a graph-based regularization term enforcing spatial smoothness based on transcriptomic similarity.
+
+\textbf{(1) Consistency with the obtained spatial alignment:}
+
+We define a cost matrix $C = \left( \exp(-D^{(1)}/\tau) \right)^{\top} A \in \mathbb{R}^{H \times N}$, where $\tau$ is a scaling parameter and $c_{h,j}$ represents the cost of assigning target point $h$ to source cell $j$. The first term encourages assignments that minimize the total cost:
+\begin{equation}
+\mathcal{L}_{1} = - \sum_{h=1}^{H} \sum_{j=1}^{N} C_{h,j} B_{h,j}
+\end{equation}
+\textbf{(2) Graph Laplacian Regularization:}
+
+To enforce spatial consistency, we compute the cell type proportions at each target point as $P^{\mathrm{H\&E}} = B L \in \mathbb{R}^{H \times T}$. We construct a pairwise distance matrix $D^{(2)} \in \mathbb{R}^{H \times H}$ based on the transcriptomic profiles of the target points. Specifically, we map each target point to its nearest spatial spot based on Euclidean distance and calculate the Pearson correlation distance between their high-variance gene expression profiles. In addition, we construct a pairwise Euclidean distance matrix $D^{(3)} \in \mathbb{R}^{H \times H}$ from the spatial coordinates. Then, we build KNN graphs $W^{(2)}$ and $W^{(3)}$ corresponding to $D^{(2)}$ and $D^{(3)}$, respectively. We compute the normalized graph Laplacian matrices $L_{\mathrm{norm}}^{(2)}$ and $L_{\mathrm{norm}}^{(3)}$.
+
+The second term of our loss function penalizes the smoothness of the mapping $P^{\mathrm{H\&E}}$ over this graph structure:
+\begin{equation}
+\mathcal{L}_{2} = \lambda_{1} \, \mathrm{tr}\left( (P^{\mathrm{H\&E}})^{\top} L_{\mathrm{norm}}^{(2)} P^{\mathrm{H\&E}} \right) + \lambda_{2} \, \mathrm{tr}\left( (P^{\mathrm{H\&E}})^{\top} L_{\mathrm{norm}}^{(3)} P^{\mathrm{H\&E}} \right)
+\end{equation}
+
+The overall objective is to minimize:
+
+\begin{equation}
+\mathcal{L}(B) = \mathcal{L}_{1} + \mathcal{L}_{2}
+\end{equation}
+
+% ==================== 以下为 Nature Communications 必填/常见补充部分 ====================
+\subsection{PCI Calculation}
+
+To calculate the Pairwise Cell Interaction (PCI), we first identified the nearest five neighboring cells, including the index cell itself, for each index cell. Subsequently, we annotated the cell types within this local window and aggregated the counts of each neighboring cell type across all windows corresponding to the same type of index cell. We then computed the likelihood ratio for each pairwise cell--cell interaction, where $O_{ij}$ denotes the observed number of times a cell of type $i$ interacts with a cell of type $j$, and $E_{ij}$ denotes the expected count under random distribution. The likelihood ratio ($LR_{ij}$) is formulated as:
+\begin{equation}    
+LR_{ij} = \frac{O_{ij}}{E_{ij} + \epsilon}
+\end{equation}
+where $\epsilon = 0.0001$ is added to avoid division by zero. The PCI score is defined as the log-transformed likelihood ratio:
+\begin{equation}    
+\text{PCI}_{ij} = \log(LR_{ij} + \epsilon) = \log\left(\frac{O_{ij}}{E_{ij} + \epsilon} + \epsilon\right)
+\end{equation}
+These PCI values were then utilized for visualization and downstream analyses of cell--cell spatial interactions. This formulation ensures that both enriched and depleted interactions can be visualized on a symmetric log scale, facilitating the comparison across different cell types.
+
+\addcontentsline{toc}{section}{Data availability}
+\section*{Data availability}
+\addcontentsline{toc}{section}{Data availability}
+
+The raw sequencing data used in this study are publicly available. The single-cell RNA-seq and spatial transcriptomics data for the Alzheimer‘s disease (AD) mouse brain dataset are accessible from the Gene Expression Omnibus (GEO) under accession number GSE209583 (5xFAD mouse model, 10× Visium spatial transcriptomics). The single-cell RNA-seq and spatial transcriptomics data for the human squamous cell carcinoma (SCC) dataset are available from GEO under accession number GSE144236, with the associated BioProject accession PRJNA603103; the corresponding study by Ji et al. is published in *Cell* (doi:10.1016/j.cell.2020.05.039). The MERFISH simulated data are derived from the publicly available spatially resolved cell atlas of the mouse primary motor cortex (PMID: 34616063), which can be accessed via the Brain Image Library under DOI: https://doi.brainimagelibrary.org/10.35077/g.21.
+
+% All processed data generated in this study, including the reconstructed single-cell-resolution spatial transcriptomic matrices and the inferred cell-to-spot mapping matrices, have been deposited in Zenodo under accession code [10.5281/zenodo.XXXXXX]. Source data are provided with this paper.
+
+\section*{Code availability}
+\addcontentsline{toc}{section}{Code availability}
+The scMagNet software package, including all core algorithms, pre‑processing scripts, and tutorials, is available on GitHub at 
+\texttt{https://github.com/sohu-123/scMagNet}. All analysis scripts to reproduce the figures and tables are also provided in the same repository.
+
+\section*{Author contributions}
+\addcontentsline{toc}{section}{Author contributions}
+Zheng Zhang, Qiuyue Yuan, Zhixin Zhou and Rui Luo conceived and designed the study. Zheng Zhang developed the scMagNet framework and implemented the algorithms. Zheng Zhang performed the data pre‑processing and the benchmarking experiments. Qiuyue Yuan, Zhixin Zhou and Rui Luo analysed the spatial gene regulation results. All authors contributed to the interpretation of the data. Zheng Zhang wrote the initial draft of the manuscript, and all authors reviewed and edited the manuscript. [Corresponding Author Name] supervised the project.
+
+\section*{Competing interests}
+\addcontentsline{toc}{section}{Competing interests}
+The authors declare no competing interests.
+
+\section*{Additional information}
+\addcontentsline{toc}{section}{Additional information}
+\textbf{Supplementary Information} is available for this paper. Correspondence and requests for materials should be addressed to [corresponding author name and email].
+
+\section*{Acknowledgements}
+\addcontentsline{toc}{section}{Acknowledgements}
+We thank [names of colleagues] for helpful discussions. This work was supported by [funding agency, grant number]. [Author Name] acknowledges support from [fellowship/institutional support].
+
+
+
+\end{document}
